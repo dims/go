@@ -1465,6 +1465,54 @@ func MarkTypeSymUsedInInterface(tsym *obj.LSym, from *obj.LSym) {
 
 // MarkUsedIfaceMethod marks that an interface method is used in the current
 // function. n is OCALLINTER node.
+// ReflectMethodLookup reports whether dot selects Method or MethodByName of
+// reflect.Value, reflect.Type, reflect.(*rtype), or reflect.(*interfaceType),
+// and returns the method name. Calling one of them with a name the linker
+// cannot see, or holding one as a value, keeps every exported method alive.
+func ReflectMethodLookup(dot *ir.SelectorExpr) (string, bool) {
+	// looking for either direct method calls and interface method calls of:
+	//	reflect.Type.Method        - func(int) reflect.Method
+	//	reflect.Type.MethodByName  - func(string) (reflect.Method, bool)
+	//
+	//	reflect.Value.Method       - func(int) reflect.Value
+	//	reflect.Value.MethodByName - func(string) reflect.Value
+	methodName := dot.Sel.Name
+	t := dot.Selection.Type
+
+	// Check the number of arguments and return values.
+	if t.NumParams() != 1 || (t.NumResults() != 1 && t.NumResults() != 2) {
+		return "", false
+	}
+
+	// Check the type of the argument.
+	switch pKind := t.Param(0).Type.Kind(); {
+	case methodName == "Method" && pKind == types.TINT,
+		methodName == "MethodByName" && pKind == types.TSTRING:
+	default:
+		return "", false
+	}
+
+	// Check that first result type is "reflect.Method" or "reflect.Value".
+	// Note that we have to check sym name and sym package separately, as
+	// we can't check for exact string "reflect.Method" reliably
+	// (e.g., see #19028 and #38515).
+	switch s := t.Result(0).Type.Sym(); {
+	case s != nil && types.ReflectSymName(s) == "Method",
+		s != nil && types.ReflectSymName(s) == "Value":
+	default:
+		return "", false
+	}
+	return methodName, true
+}
+
+// MarkReflectMethodLookup sets the ReflectMethod attribute on sym when dot is
+// a method expression of a reflect method lookup stored as a value.
+func MarkReflectMethodLookup(sym *obj.LSym, dot *ir.SelectorExpr) {
+	if _, ok := ReflectMethodLookup(dot); ok {
+		sym.Set(obj.AttrReflectMethod, true)
+	}
+}
+
 func MarkUsedIfaceMethod(curfunc *ir.Func, n *ir.CallExpr) {
 	// skip unnamed functions (func _())
 	if curfunc.LSym == nil {

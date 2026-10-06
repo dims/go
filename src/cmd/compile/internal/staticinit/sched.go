@@ -210,6 +210,7 @@ func (s *Schedule) staticcopy(curfunc *ir.Func, l *ir.Name, loff int64, rn *ir.N
 
 	switch r.Op() {
 	case ir.OMETHEXPR:
+		reflectdata.MarkReflectMethodLookup(l.Linksym(), r.(*ir.SelectorExpr))
 		r = r.(*ir.SelectorExpr).FuncName()
 		fallthrough
 	case ir.ONAME:
@@ -341,6 +342,7 @@ func (s *Schedule) StaticAssign(curfunc *ir.Func, l *ir.Name, loff int64, r ir.N
 			return false
 		}
 		r := r.(*ir.SelectorExpr)
+		reflectdata.MarkReflectMethodLookup(l.Linksym(), r)
 		return s.staticcopy(curfunc, l, loff, r.FuncName(), typ)
 
 	case ir.ONIL:

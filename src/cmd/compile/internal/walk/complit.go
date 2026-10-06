@@ -7,6 +7,7 @@ package walk
 import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
+	"cmd/compile/internal/reflectdata"
 	"cmd/compile/internal/ssa"
 	"cmd/compile/internal/staticdata"
 	"cmd/compile/internal/staticinit"
@@ -489,6 +490,7 @@ func (w *walkState) anylit(n ir.Node, var_ ir.Node, init *ir.Nodes) {
 
 	case ir.OMETHEXPR:
 		n := n.(*ir.SelectorExpr)
+		reflectdata.MarkReflectMethodLookup(w.curfunc.LSym, n)
 		w.anylit(n.FuncName(), var_, init)
 
 	case ir.OPTRLIT:
@@ -617,6 +619,7 @@ func genAsStatic(as *ir.AssignStmt) {
 		return
 	case ir.OMETHEXPR:
 		r := r.(*ir.SelectorExpr)
+		reflectdata.MarkReflectMethodLookup(name.Linksym(), r)
 		staticdata.InitAddr(name, offset, staticdata.FuncLinksym(r.FuncName()))
 		return
 	case ir.ONAME:

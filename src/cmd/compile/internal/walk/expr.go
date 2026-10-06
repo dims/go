@@ -101,6 +101,11 @@ func (w *walkState) walkExpr1(n ir.Node, init *ir.Nodes) ir.Node {
 	case ir.OMETHEXPR:
 		// TODO(mdempsky): Do this right after type checking.
 		n := n.(*ir.SelectorExpr)
+		// A value use (walkCall1 handles callees) may later be called with a
+		// name the linker cannot see.
+		if _, ok := w.reflectMethodLookup(n); ok {
+			w.curfunc.LSym.Set(obj.AttrReflectMethod, true)
+		}
 		return n.FuncName()
 
 	case ir.OMIN, ir.OMAX:
@@ -648,7 +653,11 @@ func (w *walkState) walkCall1(n *ir.CallExpr, init *ir.Nodes) {
 	args := n.Args
 	params := n.Fun.Type().Params()
 
-	n.Fun = w.walkExpr(n.Fun, init)
+	if fn, ok := n.Fun.(*ir.SelectorExpr); ok && fn.Op() == ir.OMETHEXPR {
+		n.Fun = fn.FuncName()
+	} else {
+		n.Fun = w.walkExpr(n.Fun, init)
+	}
 	w.walkExprList(args, init)
 
 	for i, arg := range args {
@@ -1066,60 +1075,12 @@ func bounded(n ir.Node, max int64) bool {
 // usemethod checks calls for uses of Method and MethodByName of reflect.Value,
 // reflect.Type, reflect.(*rtype), and reflect.(*interfaceType).
 func (w *walkState) usemethod(n *ir.CallExpr) {
-	// Don't mark reflect.(*rtype).Method, etc. themselves in the reflect package.
-	// Those functions may be alive via the itab, which should not cause all methods
-	// alive. We only want to mark their callers.
-	if base.Ctxt.Pkgpath == "reflect" {
-		// TODO: is there a better way than hardcoding the names?
-		switch fn := w.curfunc.Nname.Sym().Name; {
-		case fn == "(*rtype).Method", fn == "(*rtype).MethodByName":
-			return
-		case fn == "(*interfaceType).Method", fn == "(*interfaceType).MethodByName":
-			return
-		case fn == "Value.Method", fn == "Value.MethodByName":
-			return
-		}
-	}
-
 	dot, ok := n.Fun.(*ir.SelectorExpr)
 	if !ok {
 		return
 	}
-
-	// looking for either direct method calls and interface method calls of:
-	//	reflect.Type.Method        - func(int) reflect.Method
-	//	reflect.Type.MethodByName  - func(string) (reflect.Method, bool)
-	//
-	//	reflect.Value.Method       - func(int) reflect.Value
-	//	reflect.Value.MethodByName - func(string) reflect.Value
-	methodName := dot.Sel.Name
-	t := dot.Selection.Type
-
-	// Check the number of arguments and return values.
-	if t.NumParams() != 1 || (t.NumResults() != 1 && t.NumResults() != 2) {
-		return
-	}
-
-	// Check the type of the argument.
-	switch pKind := t.Param(0).Type.Kind(); {
-	case methodName == "Method" && pKind == types.TINT,
-		methodName == "MethodByName" && pKind == types.TSTRING:
-
-	default:
-		// not a call to Method or MethodByName of reflect.{Type,Value}.
-		return
-	}
-
-	// Check that first result type is "reflect.Method" or "reflect.Value".
-	// Note that we have to check sym name and sym package separately, as
-	// we can't check for exact string "reflect.Method" reliably
-	// (e.g., see #19028 and #38515).
-	switch s := t.Result(0).Type.Sym(); {
-	case s != nil && types.ReflectSymName(s) == "Method",
-		s != nil && types.ReflectSymName(s) == "Value":
-
-	default:
-		// not a call to Method or MethodByName of reflect.{Type,Value}.
+	methodName, ok := w.reflectMethodLookup(dot)
+	if !ok {
 		return
 	}
 
@@ -1139,6 +1100,7 @@ func (w *walkState) usemethod(n *ir.CallExpr) {
 
 	if ir.IsConst(targetName, constant.String) {
 		name := constant.StringVal(targetName.Val())
+
 		w.curfunc.LSym.AddRel(base.Ctxt, obj.Reloc{
 			Type: objabi.R_USENAMEDMETHOD,
 			Sym:  staticdata.StringSymNoCommon(name),
@@ -1146,6 +1108,28 @@ func (w *walkState) usemethod(n *ir.CallExpr) {
 	} else {
 		w.curfunc.LSym.Set(obj.AttrReflectMethod, true)
 	}
+}
+
+// reflectMethodLookup reports whether dot selects Method or MethodByName of
+// reflect.Value, reflect.Type, reflect.(*rtype), or reflect.(*interfaceType),
+// and returns the method name.
+func (w *walkState) reflectMethodLookup(dot *ir.SelectorExpr) (string, bool) {
+	// Don't mark reflect.(*rtype).Method, etc. themselves in the reflect package.
+	// Those functions may be alive via the itab, which should not cause all methods
+	// alive. We only want to mark their callers.
+	if base.Ctxt.Pkgpath == "reflect" {
+		// TODO: is there a better way than hardcoding the names?
+		switch fn := w.curfunc.Nname.Sym().Name; {
+		case fn == "(*rtype).Method", fn == "(*rtype).MethodByName":
+			return "", false
+		case fn == "(*interfaceType).Method", fn == "(*interfaceType).MethodByName":
+			return "", false
+		case fn == "Value.Method", fn == "Value.MethodByName":
+			return "", false
+		}
+	}
+
+	return reflectdata.ReflectMethodLookup(dot)
 }
 
 func (w *walkState) usefield(n *ir.SelectorExpr) {
