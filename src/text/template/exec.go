@@ -37,6 +37,8 @@ type state struct {
 	node  parse.Node // current node, for errors
 	vars  []variable // push-down stack of variable values.
 	depth int        // the height of the stack of executing templates.
+	// method resolves a name to a method of a value; nil disables methods.
+	method func(recv reflect.Value, name string) reflect.Value
 }
 
 // variable holds the dynamic value of a variable such as $, $x etc.
@@ -204,19 +206,39 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data any) error {
 // If data is a [reflect.Value], the template applies to the concrete
 // value that the reflect.Value holds, as in [fmt.Print].
 func (t *Template) Execute(wr io.Writer, data any) error {
-	return t.execute(wr, data)
+	return t.execute(wr, data, methodByName)
 }
 
-func (t *Template) execute(wr io.Writer, data any) (err error) {
+// ExecuteWithoutMethods is like Execute but never resolves a name to a
+// method: a name refers only to a struct field or a map key, and a name
+// with neither is an error. Template functions, and the String and Error
+// methods used to print values, still run.
+//
+// When every template execution in a program uses it, template execution
+// does not make a dynamic method lookup reachable, and the linker can
+// discard methods that only such a lookup would have kept.
+func (t *Template) ExecuteWithoutMethods(wr io.Writer, data any) error {
+	return t.execute(wr, data, nil)
+}
+
+// methodByName is the method lookup used by Execute. It is a separate
+// function so that only programs that reach Execute reach the dynamic
+// lookup, which keeps every exported method of the program alive.
+func methodByName(recv reflect.Value, name string) reflect.Value {
+	return recv.MethodByName(name)
+}
+
+func (t *Template) execute(wr io.Writer, data any, method func(reflect.Value, string) reflect.Value) (err error) {
 	defer errRecover(&err)
 	value, ok := data.(reflect.Value)
 	if !ok {
 		value = reflect.ValueOf(data)
 	}
 	state := &state{
-		tmpl: t,
-		wr:   wr,
-		vars: []variable{{"$", value}},
+		tmpl:   t,
+		wr:     wr,
+		vars:   []variable{{"$", value}},
+		method: method,
 	}
 	if t.Tree == nil || t.Root == nil {
 		state.errorf("%q is an incomplete or empty template", t.Name())
@@ -709,7 +731,7 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node, 
 	if ptr.Kind() != reflect.Interface && ptr.Kind() != reflect.Pointer && ptr.CanAddr() {
 		ptr = ptr.Addr()
 	}
-	if method := ptr.MethodByName(fieldName); method.IsValid() {
+	if method := s.findMethod(ptr, fieldName); method.IsValid() {
 		return s.evalCall(dot, method, false, node, fieldName, args, final)
 	}
 	hasArgs := len(args) > 1 || !isMissing(final)
@@ -774,6 +796,16 @@ var (
 	reflectValueType = reflect.TypeFor[reflect.Value]()
 	stringType       = reflect.TypeFor[string]()
 )
+
+// findMethod returns the method of recv called name, bound to recv, or the
+// zero Value if recv has no such method or this execution does not resolve
+// names to methods.
+func (s *state) findMethod(recv reflect.Value, name string) reflect.Value {
+	if s.method == nil {
+		return reflect.Value{}
+	}
+	return s.method(recv, name)
+}
 
 // evalCall executes a function or method call. If it's a method, fun already has the receiver bound, so
 // it looks just like a function call. The arg list, if non-nil, includes (in the manner of the shell), arg[0]

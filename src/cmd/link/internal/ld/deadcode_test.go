@@ -30,6 +30,9 @@ func TestDeadcode(t *testing.T) {
 		{"ifacemethod5", []string{"main.S.M"}, nil},
 		{"ifacemethod6", []string{"main.S.M"}, []string{"main.S.N"}},
 		{"structof_funcof", []string{"main.S.M"}, []string{"main.S.N"}},
+		{"tmplnomethods_text", nil, []string{"main.T.M"}},
+		{"tmplnomethods_html", nil, []string{"main.T.M"}},
+		{"tmplnomethods_execute", []string{"main.T.M"}, nil},
 		{"globalmap", []string{"main.small", "main.effect"},
 			[]string{"main.large"}},
 	}

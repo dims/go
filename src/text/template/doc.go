@@ -231,6 +231,9 @@ An argument is a simple value, denoted by one of the following.
 	  Methods can also be evaluated on variables, including chaining:
 
 	    $x.Method1.Field
+
+	  [Template.ExecuteWithoutMethods] executes a template without
+	  resolving names to methods.
 	- The name of a niladic function, such as
 
 		fun

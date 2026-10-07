@@ -1,0 +1,2 @@
+pkg html/template, method (*Template) ExecuteWithoutMethods(io.Writer, interface{}) error #72895
+pkg text/template, method (*Template) ExecuteWithoutMethods(io.Writer, interface{}) error #72895

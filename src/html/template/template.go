@@ -125,6 +125,15 @@ func (t *Template) Execute(wr io.Writer, data any) error {
 	return t.text.Execute(wr, data)
 }
 
+// ExecuteWithoutMethods is like Execute but never resolves a name to a
+// method, as [text/template.Template.ExecuteWithoutMethods] describes.
+func (t *Template) ExecuteWithoutMethods(wr io.Writer, data any) error {
+	if err := t.escape(); err != nil {
+		return err
+	}
+	return t.text.ExecuteWithoutMethods(wr, data)
+}
+
 // ExecuteTemplate applies the template associated with t that has the given
 // name to the specified data object and writes the output to wr.
 // If an error occurs executing the template or writing its output,
