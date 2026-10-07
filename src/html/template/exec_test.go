@@ -823,6 +823,9 @@ func testExecute(execTests []execTest, template *Template, t *testing.T) {
 }
 
 func TestExecute(t *testing.T) {
+	if !methodsEnabled {
+		t.Skip("method calls disabled by the templatenomethods build tag")
+	}
 	testExecute(execTests, nil, t)
 }
 
@@ -871,6 +874,9 @@ func TestDelims(t *testing.T) {
 
 // Check that an error from a method flows back to the top.
 func TestExecuteError(t *testing.T) {
+	if !methodsEnabled {
+		t.Skip("method calls disabled by the templatenomethods build tag")
+	}
 	b := new(bytes.Buffer)
 	tmpl := New("error")
 	_, err := tmpl.Parse("{{.MyError true}}")
@@ -1521,6 +1527,9 @@ func TestMaxExecDepth(t *testing.T) {
 }
 
 func TestAddrOfIndex(t *testing.T) {
+	if !methodsEnabled {
+		t.Skip("method calls disabled by the templatenomethods build tag")
+	}
 	// golang.org/issue/14916.
 	// Before index worked on reflect.Values, the .String could not be
 	// found on the (incorrectly unaddressable) V value,
@@ -1618,6 +1627,9 @@ func TestInterfaceValues(t *testing.T) {
 
 // Check that panics during calls are recovered and returned as errors.
 func TestExecutePanicDuringCall(t *testing.T) {
+	if !methodsEnabled {
+		t.Skip("method calls disabled by the templatenomethods build tag")
+	}
 	funcs := map[string]any{
 		"doPanic": func() string {
 			panic("custom panic string")
@@ -1802,6 +1814,9 @@ func (r *recursiveInvoker) Recur() (string, error) {
 }
 
 func TestRecursiveExecuteViaMethod(t *testing.T) {
+	if !methodsEnabled {
+		t.Skip("method calls disabled by the templatenomethods build tag")
+	}
 	tmpl := New("")
 	top, err := tmpl.New("x.html").Parse(`{{.Recur}}`)
 	if err != nil {

@@ -710,6 +710,15 @@ func (t *tester) registerTests() {
 		})
 	}
 
+	// Likewise keep the templatenomethods build tag from rotting.
+	for _, pkg := range []string{"text/template", "html/template"} {
+		t.registerTest(pkg+" with tag templatenomethods", &goTest{
+			variant: "templatenomethods",
+			tags:    []string{"templatenomethods"},
+			pkg:     pkg,
+		})
+	}
+
 	// Check that all crypto packages compile with the purego build tag.
 	t.registerTest("crypto with tag purego (build and vet only)", &goTest{
 		variant:  "purego",

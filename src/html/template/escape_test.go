@@ -2142,6 +2142,9 @@ func (Issue7379) SomeMethod(x int) string {
 // problem once the first is fixed, but its fix is trivial so we let that go. See
 // the discussion for issue 7379.
 func TestPipeToMethodIsEscaped(t *testing.T) {
+	if !methodsEnabled {
+		t.Skip("method calls disabled by the templatenomethods build tag")
+	}
 	tmpl := Must(New("x").Parse("<html>{{0 | .SomeMethod}}</html>\n"))
 	tryExec := func() string {
 		defer func() {

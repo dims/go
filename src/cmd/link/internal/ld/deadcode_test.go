@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"internal/testenv"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,25 +21,36 @@ func TestDeadcode(t *testing.T) {
 	tests := []struct {
 		src      string
 		pos, neg []string // positive and negative patterns
+		tags     []string // build tags, if any
 	}{
-		{"reflectcall", nil, []string{"main.T.M"}},
-		{"typedesc", nil, []string{"type:main.T"}},
-		{"ifacemethod", nil, []string{"main.T.M"}},
-		{"ifacemethod2", []string{"main.T.M"}, nil},
-		{"ifacemethod3", []string{"main.S.M"}, nil},
-		{"ifacemethod4", nil, []string{"main.T.M"}},
-		{"ifacemethod5", []string{"main.S.M"}, nil},
-		{"ifacemethod6", []string{"main.S.M"}, []string{"main.S.N"}},
-		{"structof_funcof", []string{"main.S.M"}, []string{"main.S.N"}},
+		{"reflectcall", nil, []string{"main.T.M"}, nil},
+		{"typedesc", nil, []string{"type:main.T"}, nil},
+		{"ifacemethod", nil, []string{"main.T.M"}, nil},
+		{"ifacemethod2", []string{"main.T.M"}, nil, nil},
+		{"ifacemethod3", []string{"main.S.M"}, nil, nil},
+		{"ifacemethod4", nil, []string{"main.T.M"}, nil},
+		{"ifacemethod5", []string{"main.S.M"}, nil, nil},
+		{"ifacemethod6", []string{"main.S.M"}, []string{"main.S.N"}, nil},
+		{"structof_funcof", []string{"main.S.M"}, []string{"main.S.N"}, nil},
 		{"globalmap", []string{"main.small", "main.effect"},
-			[]string{"main.large"}},
+			[]string{"main.large"}, nil},
+		{"tmplnomethodstag", []string{"main.T.M"}, nil, nil},
+		{"tmplnomethodstag", nil, []string{"main.T.M"}, []string{"templatenomethods"}},
 	}
 	for _, test := range tests {
-		t.Run(test.src, func(t *testing.T) {
+		name := test.src
+		if len(test.tags) > 0 {
+			name += "_" + strings.Join(test.tags, "_")
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join("testdata", "deadcode", test.src+".go")
-			exe := filepath.Join(tmpdir, test.src+".exe")
-			cmd := testenv.Command(t, testenv.GoToolPath(t), "build", "-ldflags=-dumpdep", "-o", exe, src)
+			exe := filepath.Join(tmpdir, name+".exe")
+			args := []string{"build", "-ldflags=-dumpdep", "-o", exe}
+			if len(test.tags) > 0 {
+				args = append(args, "-tags="+strings.Join(test.tags, ","))
+			}
+			cmd := testenv.Command(t, testenv.GoToolPath(t), append(args, src)...)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("%v: %v:\n%s", cmd.Args, err, out)

@@ -231,6 +231,10 @@ An argument is a simple value, denoted by one of the following.
 	  Methods can also be evaluated on variables, including chaining:
 
 	    $x.Method1.Field
+
+	  With the templatenomethods build tag a name never resolves to a method,
+	  so the linker can discard methods that no code calls directly; a
+	  template that names a method then fails with an execution error.
 	- The name of a niladic function, such as
 
 		fun

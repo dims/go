@@ -709,7 +709,7 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node, 
 	if ptr.Kind() != reflect.Interface && ptr.Kind() != reflect.Pointer && ptr.CanAddr() {
 		ptr = ptr.Addr()
 	}
-	if method := ptr.MethodByName(fieldName); method.IsValid() {
+	if method := methodByName(ptr, fieldName); method.IsValid() {
 		return s.evalCall(dot, method, false, node, fieldName, args, final)
 	}
 	hasArgs := len(args) > 1 || !isMissing(final)
