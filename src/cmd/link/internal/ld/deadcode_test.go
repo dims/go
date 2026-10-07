@@ -30,6 +30,11 @@ func TestDeadcode(t *testing.T) {
 		{"ifacemethod5", []string{"main.S.M"}, nil},
 		{"ifacemethod6", []string{"main.S.M"}, []string{"main.S.N"}},
 		{"structof_funcof", []string{"main.S.M"}, []string{"main.S.N"}},
+		{"tmplresolver_nil", nil, []string{"main.T.M"}},
+		{"tmplresolver_html", nil, []string{"main.T.M"}},
+		{"tmplresolver_typeswitch", []string{"main.A.Hello", "main.B.Hello"}, []string{"main.A.Goodbye", "main.B.Goodbye"}},
+		{"tmplresolver_dynamic", []string{"main.A.Hello", "main.A.Goodbye", "main.B.Hello", "main.B.Goodbye"}, nil},
+		{"tmplresolver_execute", []string{"main.T.M"}, nil},
 		{"globalmap", []string{"main.small", "main.effect"},
 			[]string{"main.large"}},
 	}

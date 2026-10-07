@@ -1,0 +1,5 @@
+pkg html/template, method (*Template) ExecuteWithResolver(io.Writer, interface{}, template.MethodResolver) error #82062
+pkg html/template, type MethodResolver = template.MethodResolver #82062
+pkg text/template, method (*Template) ExecuteWithResolver(io.Writer, interface{}, MethodResolver) error #82062
+pkg text/template, type MethodResolver interface { Resolve } #82062
+pkg text/template, type MethodResolver interface, Resolve(interface{}, string) interface{} #82062

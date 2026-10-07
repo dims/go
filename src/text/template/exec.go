@@ -37,6 +37,10 @@ type state struct {
 	node  parse.Node // current node, for errors
 	vars  []variable // push-down stack of variable values.
 	depth int        // the height of the stack of executing templates.
+	// method is Execute's method lookup and resolver is ExecuteWithResolver's;
+	// nil finds no methods.
+	method   func(recv reflect.Value, name string) reflect.Value
+	resolver MethodResolver
 }
 
 // variable holds the dynamic value of a variable such as $, $x etc.
@@ -204,19 +208,56 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data any) error {
 // If data is a [reflect.Value], the template applies to the concrete
 // value that the reflect.Value holds, as in [fmt.Print].
 func (t *Template) Execute(wr io.Writer, data any) error {
-	return t.execute(wr, data)
+	return t.execute(wr, data, methodByName, nil)
 }
 
-func (t *Template) execute(wr io.Writer, data any) (err error) {
+// A MethodResolver resolves the name in a field reference such as .Name to
+// a function to call. Execute resolves names to methods of the data by
+// reflection; ExecuteWithResolver asks a MethodResolver instead.
+type MethodResolver interface {
+	// Resolve returns the function to call for name on receiver, or nil when
+	// there is none, in which case the name is looked up as a struct field
+	// or map key. The function is called with the arguments of the
+	// reference, so a method value such as receiver.Name is the usual
+	// result. The receiver is the value being evaluated, or a pointer to it
+	// when it is addressable, so that methods with pointer receivers are
+	// available as they are to Execute. Resolve may be called concurrently
+	// by parallel executions.
+	Resolve(receiver any, name string) any
+}
+
+// ExecuteWithResolver is like Execute but resolves methods with resolver.
+// A nil resolver disables resolving a name to a method: the name then
+// refers only to a struct field or a map key, with the same errors and
+// missingkey behavior as Execute when there is none. Template functions,
+// and the String and Error methods used to print values, still run.
+//
+// When every template execution in a program uses a nil resolver, template
+// execution does not make a dynamic method lookup reachable, and the linker
+// can discard methods that only such a lookup would have kept. A resolver
+// that returns method values from a type switch keeps only those methods;
+// one that looks methods up by reflection with a non-constant method name
+// keeps all exported methods, as Execute does.
+func (t *Template) ExecuteWithResolver(wr io.Writer, data any, resolver MethodResolver) error {
+	return t.execute(wr, data, nil, resolver)
+}
+
+func methodByName(recv reflect.Value, name string) reflect.Value {
+	return recv.MethodByName(name)
+}
+
+func (t *Template) execute(wr io.Writer, data any, method func(reflect.Value, string) reflect.Value, resolver MethodResolver) (err error) {
 	defer errRecover(&err)
 	value, ok := data.(reflect.Value)
 	if !ok {
 		value = reflect.ValueOf(data)
 	}
 	state := &state{
-		tmpl: t,
-		wr:   wr,
-		vars: []variable{{"$", value}},
+		tmpl:     t,
+		wr:       wr,
+		vars:     []variable{{"$", value}},
+		method:   method,
+		resolver: resolver,
 	}
 	if t.Tree == nil || t.Root == nil {
 		state.errorf("%q is an incomplete or empty template", t.Name())
@@ -709,7 +750,7 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node, 
 	if ptr.Kind() != reflect.Interface && ptr.Kind() != reflect.Pointer && ptr.CanAddr() {
 		ptr = ptr.Addr()
 	}
-	if method := ptr.MethodByName(fieldName); method.IsValid() {
+	if method := s.findMethod(ptr, fieldName); method.IsValid() {
 		return s.evalCall(dot, method, false, node, fieldName, args, final)
 	}
 	hasArgs := len(args) > 1 || !isMissing(final)
@@ -774,6 +815,47 @@ var (
 	reflectValueType = reflect.TypeFor[reflect.Value]()
 	stringType       = reflect.TypeFor[string]()
 )
+
+// findMethod resolves name to a function for recv: through the resolver of
+// ExecuteWithResolver, through Execute's reflection lookup, or not at all.
+func (s *state) findMethod(recv reflect.Value, name string) reflect.Value {
+	switch {
+	case s.resolver != nil:
+		if !recv.CanInterface() {
+			return reflect.Value{}
+		}
+		fn, err := s.resolve(recv.Interface(), name)
+		if err != nil {
+			s.errorf("error calling method resolver for %s: %w", name, err)
+		}
+		if fn == nil {
+			return reflect.Value{}
+		}
+		v := reflect.ValueOf(fn)
+		if v.Kind() != reflect.Func {
+			s.errorf("method resolver returned %T for %s, not a function", fn, name)
+		}
+		return v
+	case s.method != nil:
+		return s.method(recv, name)
+	}
+	return reflect.Value{}
+}
+
+// resolve calls the resolver, turning a panic into an error as safeCall does
+// for functions.
+func (s *state) resolve(recv any, name string) (fn any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("%v", r)
+			}
+		}
+	}()
+	return s.resolver.Resolve(recv, name), nil
+}
 
 // evalCall executes a function or method call. If it's a method, fun already has the receiver bound, so
 // it looks just like a function call. The arg list, if non-nil, includes (in the manner of the shell), arg[0]

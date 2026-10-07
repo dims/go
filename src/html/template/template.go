@@ -125,6 +125,16 @@ func (t *Template) Execute(wr io.Writer, data any) error {
 	return t.text.Execute(wr, data)
 }
 
+// ExecuteWithResolver is like Execute but resolves methods with resolver,
+// as [text/template.Template.ExecuteWithResolver] does. A nil resolver
+// disables resolving a name to a method.
+func (t *Template) ExecuteWithResolver(wr io.Writer, data any, resolver MethodResolver) error {
+	if err := t.escape(); err != nil {
+		return err
+	}
+	return t.text.ExecuteWithResolver(wr, data, resolver)
+}
+
 // ExecuteTemplate applies the template associated with t that has the given
 // name to the specified data object and writes the output to wr.
 // If an error occurs executing the template or writing its output,
@@ -330,6 +340,9 @@ func (t *Template) Name() string {
 }
 
 type FuncMap = template.FuncMap
+
+// MethodResolver is an alias for [text/template.MethodResolver].
+type MethodResolver = template.MethodResolver
 
 // Funcs adds the elements of the argument map to the template's function map.
 // Any function used in the template must be added before the template is
