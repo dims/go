@@ -32,11 +32,13 @@ func initMaxExecDepth() int {
 // template so that multiple executions of the same template
 // can execute in parallel.
 type state struct {
-	tmpl  *Template
-	wr    io.Writer
-	node  parse.Node // current node, for errors
-	vars  []variable // push-down stack of variable values.
-	depth int        // the height of the stack of executing templates.
+	tmpl    *Template
+	wr      io.Writer
+	node    parse.Node                                          // current node, for errors
+	vars    []variable                                          // push-down stack of variable values.
+	depth   int                                                 // the height of the stack of executing templates.
+	method  func(recv reflect.Value, name string) reflect.Value // finds a method of the data; nil finds none.
+	methods FuncMap                                             // functions that stand in for methods of the data.
 }
 
 // variable holds the dynamic value of a variable such as $, $x etc.
@@ -204,19 +206,69 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data any) error {
 // If data is a [reflect.Value], the template applies to the concrete
 // value that the reflect.Value holds, as in [fmt.Print].
 func (t *Template) Execute(wr io.Writer, data any) error {
-	return t.execute(wr, data)
+	return t.execute(wr, data, methodByName, nil)
 }
 
-func (t *Template) execute(wr io.Writer, data any) (err error) {
+// ExecuteWithMethods is like [Template.Execute], but the Name in a
+// reference such as .Name resolves to the function methods["Name"] if
+// there is one, else to a struct field or map key, and never to a method
+// of the data by reflection. A nil map disables methods. Template
+// functions, and the String and Error methods used to print values,
+// still run.
+//
+// Unlike a function registered with [Template.Funcs], a function in
+// methods takes the receiver as its first parameter, then the arguments
+// of the call; the receiver is passed as the value being evaluated if
+// that is assignable to the first parameter, else as a pointer to it. The
+// results follow the [FuncMap] rules: one value, or a value and an error.
+// A value in methods that is not such a function is an error.
+//
+// When every template execution in a program uses ExecuteWithMethods,
+// template execution does not make a dynamic method lookup reachable,
+// and the linker keeps only the functions that the maps reference.
+func (t *Template) ExecuteWithMethods(wr io.Writer, data any, methods FuncMap) error {
+	for name, fn := range methods {
+		if err := goodMethod(name, fn); err != nil {
+			return err
+		}
+	}
+	return t.execute(wr, data, nil, methods)
+}
+
+// goodMethod reports whether fn can implement the method name for ExecuteWithMethods.
+func goodMethod(name string, fn any) error {
+	typ := reflect.TypeOf(fn)
+	if typ == nil || typ.Kind() != reflect.Func {
+		return fmt.Errorf("template: method %q: value is not a function", name)
+	}
+	if typ.NumIn() == 0 {
+		return fmt.Errorf("template: method %q: function has no receiver parameter", name)
+	}
+	if err := goodFunc(name, typ); err != nil {
+		return fmt.Errorf("template: method %q: %v", name, err)
+	}
+	return nil
+}
+
+// methodByName finds a method of recv by reflection. It is a separate
+// function, referenced only by Execute, so that ExecuteWithMethods does not
+// make the dynamic lookup reachable.
+func methodByName(recv reflect.Value, name string) reflect.Value {
+	return recv.MethodByName(name)
+}
+
+func (t *Template) execute(wr io.Writer, data any, method func(reflect.Value, string) reflect.Value, methods FuncMap) (err error) {
 	defer errRecover(&err)
 	value, ok := data.(reflect.Value)
 	if !ok {
 		value = reflect.ValueOf(data)
 	}
 	state := &state{
-		tmpl: t,
-		wr:   wr,
-		vars: []variable{{"$", value}},
+		tmpl:    t,
+		wr:      wr,
+		vars:    []variable{{"$", value}},
+		method:  method,
+		methods: methods,
 	}
 	if t.Tree == nil || t.Root == nil {
 		state.errorf("%q is an incomplete or empty template", t.Name())
@@ -681,7 +733,7 @@ func (s *state) evalFunction(dot reflect.Value, node *parse.IdentifierNode, cmd 
 	if !ok {
 		s.errorf("%q is not a defined function", name)
 	}
-	return s.evalCall(dot, function, isBuiltin, cmd, name, args, final)
+	return s.evalCall(dot, function, isBuiltin, cmd, name, args, final, zero)
 }
 
 // evalField evaluates an expression like (.Field) or (.Field arg1 arg2).
@@ -709,8 +761,21 @@ func (s *state) evalField(dot reflect.Value, fieldName string, node parse.Node, 
 	if ptr.Kind() != reflect.Interface && ptr.Kind() != reflect.Pointer && ptr.CanAddr() {
 		ptr = ptr.Addr()
 	}
-	if method := ptr.MethodByName(fieldName); method.IsValid() {
-		return s.evalCall(dot, method, false, node, fieldName, args, final)
+	if fn, ok := s.methods[fieldName]; ok {
+		fun := reflect.ValueOf(fn)
+		recv := receiver
+		if in := fun.Type().In(0); !recv.Type().AssignableTo(in) {
+			if !ptr.Type().AssignableTo(in) {
+				s.errorf("wrong receiver type for method %s; expected %s; got %s", fieldName, in, typ)
+			}
+			recv = ptr
+		}
+		return s.evalCall(dot, fun, false, node, fieldName, args, final, recv)
+	}
+	if s.method != nil {
+		if method := s.method(ptr, fieldName); method.IsValid() {
+			return s.evalCall(dot, method, false, node, fieldName, args, final, zero)
+		}
 	}
 	hasArgs := len(args) > 1 || !isMissing(final)
 	// It's not a method; must be a field of a struct or an element of a map.
@@ -776,25 +841,30 @@ var (
 )
 
 // evalCall executes a function or method call. If it's a method, fun already has the receiver bound, so
-// it looks just like a function call. The arg list, if non-nil, includes (in the manner of the shell), arg[0]
+// it looks just like a function call. If recv is valid, it is an ExecuteWithMethods function's receiver and is passed
+// before the template's arguments. The arg list, if non-nil, includes (in the manner of the shell), arg[0]
 // as the function itself.
-func (s *state) evalCall(dot, fun reflect.Value, isBuiltin bool, node parse.Node, name string, args []parse.Node, final reflect.Value) reflect.Value {
+func (s *state) evalCall(dot, fun reflect.Value, isBuiltin bool, node parse.Node, name string, args []parse.Node, final, recv reflect.Value) reflect.Value {
 	if args != nil {
 		args = args[1:] // Zeroth arg is function name/node; not passed to function.
 	}
 	typ := fun.Type()
-	numIn := len(args)
+	numRecv := 0
+	if recv.IsValid() {
+		numRecv = 1
+	}
+	numIn := numRecv + len(args)
 	if !isMissing(final) {
 		numIn++
 	}
-	numFixed := len(args)
+	numFixed := numRecv + len(args)
 	if typ.IsVariadic() {
 		numFixed = typ.NumIn() - 1 // last arg is the variadic one.
 		if numIn < numFixed {
-			s.errorf("wrong number of args for %s: want at least %d got %d", name, typ.NumIn()-1, len(args))
+			s.errorf("wrong number of args for %s: want at least %d got %d", name, numFixed-numRecv, len(args))
 		}
 	} else if numIn != typ.NumIn() {
-		s.errorf("wrong number of args for %s: want %d got %d", name, typ.NumIn(), numIn)
+		s.errorf("wrong number of args for %s: want %d got %d", name, typ.NumIn()-numRecv, numIn-numRecv)
 	}
 	if err := goodFunc(name, typ); err != nil {
 		s.errorf("%v", err)
@@ -831,18 +901,21 @@ func (s *state) evalCall(dot, fun reflect.Value, isBuiltin bool, node parse.Node
 		return v
 	}
 
-	// Build the arg list.
+	// Build the arg list, receiver first.
 	argv := make([]reflect.Value, numIn)
+	if numRecv > 0 {
+		argv[0] = recv
+	}
 	// Args must be evaluated. Fixed args first.
-	i := 0
-	for ; i < numFixed && i < len(args); i++ {
-		argv[i] = s.evalArg(dot, typ.In(i), args[i])
+	i := numRecv
+	for ; i < numFixed && i-numRecv < len(args); i++ {
+		argv[i] = s.evalArg(dot, typ.In(i), args[i-numRecv])
 	}
 	// Now the ... args.
 	if typ.IsVariadic() {
 		argType := typ.In(typ.NumIn() - 1).Elem() // Argument is a slice.
-		for ; i < len(args); i++ {
-			argv[i] = s.evalArg(dot, argType, args[i])
+		for ; i-numRecv < len(args); i++ {
+			argv[i] = s.evalArg(dot, argType, args[i-numRecv])
 		}
 	}
 	// Add final value if necessary.

@@ -231,6 +231,9 @@ An argument is a simple value, denoted by one of the following.
 	  Methods can also be evaluated on variables, including chaining:
 
 	    $x.Method1.Field
+
+	  [Template.ExecuteWithMethods] resolves method names through a
+	  [FuncMap] of functions that take the receiver first, instead.
 	- The name of a niladic function, such as
 
 		fun

@@ -125,6 +125,16 @@ func (t *Template) Execute(wr io.Writer, data any) error {
 	return t.text.Execute(wr, data)
 }
 
+// ExecuteWithMethods is like [Template.Execute], but resolves method names
+// through methods, as [text/template.Template.ExecuteWithMethods] does.
+// A nil map disables methods.
+func (t *Template) ExecuteWithMethods(wr io.Writer, data any, methods FuncMap) error {
+	if err := t.escape(); err != nil {
+		return err
+	}
+	return t.text.ExecuteWithMethods(wr, data, methods)
+}
+
 // ExecuteTemplate applies the template associated with t that has the given
 // name to the specified data object and writes the output to wr.
 // If an error occurs executing the template or writing its output,

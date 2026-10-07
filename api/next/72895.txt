@@ -1,0 +1,2 @@
+pkg html/template, method (*Template) ExecuteWithMethods(io.Writer, interface{}, template.FuncMap) error #72895
+pkg text/template, method (*Template) ExecuteWithMethods(io.Writer, interface{}, FuncMap) error #72895
