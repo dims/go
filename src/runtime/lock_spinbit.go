@@ -337,7 +337,7 @@ func unlock2(l *mutex) {
 // mutexSampleContention returns whether the current mutex operation should
 // report any contention it discovers.
 func mutexSampleContention() bool {
-	rate := atomic.Load64(&mutexprofilerate)
+	rate := atomic.Load64(&profRate.mutex)
 	return rate > 0 && cheaprandu64()%rate == 0
 }
 

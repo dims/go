@@ -9,6 +9,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/cpu"
 	"internal/goarch"
 	"internal/profilerecord"
 	"internal/runtime/atomic"
@@ -570,7 +571,20 @@ func mProf_Free(b *bucket) {
 	unlock(&profMemFutureLock[index])
 }
 
-var blockprofilerate uint64 // in CPU ticks
+// profRate holds the block and mutex profiling rates.
+//
+// They are read on hot paths (every channel operation and every unlock of
+// a runtime mutex) and written only when a rate changes. The padding keeps
+// them off the cache lines of frequently written globals such as
+// profBlockLock, which is written for every event in the block profile.
+var profRate profRateType
+
+type profRateType struct {
+	_     cpu.CacheLinePad
+	block uint64 // in CPU ticks
+	mutex uint64 // fraction sampled
+	_     cpu.CacheLinePad
+}
 
 // SetBlockProfileRate controls the fraction of goroutine blocking events
 // that are reported in the blocking profile. The profiler aims to sample
@@ -592,7 +606,7 @@ func SetBlockProfileRate(rate int) {
 		}
 	}
 
-	atomic.Store64(&blockprofilerate, uint64(r))
+	atomic.Store64(&profRate.block, uint64(r))
 }
 
 func blockevent(cycles int64, skip int) {
@@ -600,7 +614,7 @@ func blockevent(cycles int64, skip int) {
 		cycles = 1
 	}
 
-	rate := int64(atomic.Load64(&blockprofilerate))
+	rate := int64(atomic.Load64(&profRate.block))
 	if blocksampled(cycles, rate) {
 		saveblockevent(cycles, rate, skip+1, blockProfile)
 	}
@@ -868,7 +882,7 @@ func (prof *mLockProfile) storeSlow() {
 	prof.cycles, prof.cyclesLost = 0, 0
 	prof.haveStack = false
 
-	rate := int64(atomic.Load64(&mutexprofilerate))
+	rate := int64(atomic.Load64(&profRate.mutex))
 	saveBlockEventStack(cycles, rate, prof.stack[:nstk], mutexProfile)
 	if lost > 0 {
 		lostStk := [...]uintptr{
@@ -905,8 +919,6 @@ func saveBlockEventStack(cycles, rate int64, stk []uintptr, which bucketType) {
 	unlock(&profBlockLock)
 }
 
-var mutexprofilerate uint64 // fraction sampled
-
 // SetMutexProfileFraction controls the fraction of mutex contention events
 // that are reported in the mutex profile. On average 1/rate events are
 // reported. The previous rate is returned.
@@ -916,10 +928,10 @@ var mutexprofilerate uint64 // fraction sampled
 // (For n>1 the details of sampling may change.)
 func SetMutexProfileFraction(rate int) int {
 	if rate < 0 {
-		return int(mutexprofilerate)
+		return int(profRate.mutex)
 	}
-	old := mutexprofilerate
-	atomic.Store64(&mutexprofilerate, uint64(rate))
+	old := profRate.mutex
+	atomic.Store64(&profRate.mutex, uint64(rate))
 	return int(old)
 }
 
@@ -927,7 +939,7 @@ func mutexevent(cycles int64, skip int) {
 	if cycles < 0 {
 		cycles = 0
 	}
-	rate := int64(atomic.Load64(&mutexprofilerate))
+	rate := int64(atomic.Load64(&profRate.mutex))
 	if rate > 0 && cheaprand64()%rate == 0 {
 		saveblockevent(cycles, rate, skip+1, mutexProfile)
 	}

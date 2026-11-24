@@ -166,11 +166,11 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	wg.releasetime = 0
 	wg.acquiretime = 0
 	wg.ticket = 0
-	if profile&semaBlockProfile != 0 && blockprofilerate > 0 {
+	if profile&semaBlockProfile != 0 && profRate.block > 0 {
 		t0 = cputicks()
 		wg.releasetime = -1
 	}
-	if profile&semaMutexProfile != 0 && mutexprofilerate > 0 {
+	if profile&semaMutexProfile != 0 && profRate.mutex > 0 {
 		if t0 == 0 {
 			t0 = cputicks()
 		}
@@ -604,7 +604,7 @@ func notifyListWait(l *notifyList, t uint32) {
 	wg.ticket = t
 	wg.releasetime = 0
 	t0 := int64(0)
-	if blockprofilerate > 0 {
+	if profRate.block > 0 {
 		t0 = cputicks()
 		wg.releasetime = -1
 	}

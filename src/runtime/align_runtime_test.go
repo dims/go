@@ -29,6 +29,8 @@ var AtomicFields = []uintptr{
 	unsafe.Offsetof(heapStatsDelta{}.inStacks),
 	unsafe.Offsetof(heapStatsDelta{}.inWorkBufs),
 	unsafe.Offsetof(lfnode{}.next),
+	unsafe.Offsetof(profRateType{}.block),
+	unsafe.Offsetof(profRateType{}.mutex),
 	unsafe.Offsetof(mstats{}.last_gc_nanotime),
 	unsafe.Offsetof(mstats{}.last_gc_unix),
 	unsafe.Offsetof(workType{}.bytesMarked),
@@ -39,8 +41,7 @@ var AtomicFields = []uintptr{
 var AtomicVariables = []unsafe.Pointer{
 	unsafe.Pointer(&ncgocall),
 	unsafe.Pointer(&test_z64),
-	unsafe.Pointer(&blockprofilerate),
-	unsafe.Pointer(&mutexprofilerate),
+	unsafe.Pointer(&profRate),
 	unsafe.Pointer(&gcController),
 	unsafe.Pointer(&memstats),
 	unsafe.Pointer(&sched),

@@ -152,7 +152,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	}
 
 	var t0 int64
-	if blockprofilerate > 0 {
+	if profRate.block > 0 {
 		t0 = cputicks()
 	}
 
